@@ -10,17 +10,27 @@ const moo = require('moo')
 
 let lexerTypes = {
   selectors: {
-    space:    { match: /\s+/, lineBreaks: true, skiptoken:true                                        },
-    selector: { match: /./,  lineBreaks: true, sublexer:'selector_element' , notext: true },
+    space:    { match: /\s+/, lineBreaks: true, skiptoken:true                                         },
+    selector: { match: /./,  lineBreaks: true, sublexer:'selector' , notext: true                      },
+  },
+  
+  selector: {
+    space:            { match: /\s+/,     lineBreaks: true              , skiptoken: true               },
+    end:              { match: /[,]/,     lineBreaks: false, end:true                                   },
+    selector_element: { match: /./,       lineBreaks: true,  sublexer:'selector_element' , notext: true },
   },
   selector_element: {
-    path:             { match: /@/,      lineBreaks: false             , sublexer:'path'              },
-    attribute:        { match: /\[/,     lineBreaks: false             , sublexer:'attribute'         },
-    value:            { match: /:value/, lineBreaks: false             , sublexer:'value_operator'    },
-    space:            { match: /\s+/,    lineBreaks: true              , skiptoken: true              },
-    has:              { match: /:has\(/, lineBreaks: false             , sublexer:'selector_element'               },
-    end:              { match: /[,\)]/,  lineBreaks: false , end:true  , skiptoken: true},
+    path:             { match: /@/,       lineBreaks: false             , sublexer:'path'              },
+    attribute:        { match: /\[/,      lineBreaks: false             , sublexer:'attribute'         },
+    id:               { match: /\#/,      lineBreaks: false             , sublexer:'id'                },
+    value:            { match: /:value/,  lineBreaks: false             , sublexer:'value_operator'    },
+    has:              { match: /:has\(/,  lineBreaks: false             , sublexer:'has'               },
+    not:              { match: /:not\(/,  lineBreaks: false             , sublexer:'not'               },
+    empty:            { match: /:empty/,  lineBreaks: false             ,                              }, // elements that have no children
+    parent:           { match: /:parent/, lineBreaks: false             ,                              }, // have at least one child node
+    end:              { match: /[\),\s]/, lineBreaks: true , end:true  , notext: true                  },
   },
+  
   path: {
     separator:        { match: /\//, lineBreaks: false, },
     path_literal:     { match: /[^\/\t\n\s\)|\]\*\?\^]+/, lineBreaks: false, },
@@ -28,9 +38,23 @@ let lexerTypes = {
     path_end:         { match: /[\/\t\n\s\)|\]]+/,  lineBreaks: true, end:true, notext: true, skiptoken: true },
   },
 
+  id: {
+    id_name:          { match: /[^\/\n\s=<>\*\?\! \t\n\s\]\)]+/, lineBreaks: false,  end:true },
+  },  
+  
+  has: {
+    end:              { match: /[\)]/,  lineBreaks: false , end:true  , skiptoken: true},
+    space:            { match: /\s+/,   lineBreaks: true,               skiptoken: true},
+    has_element:      { match: /./,     lineBreaks: true              , notext: true, sublexer:'selector_element' },
+  },
+  not: {
+    end:              { match: /[\)]/,  lineBreaks: false , end:true  , skiptoken: true},
+    space:            { match: /\s+/,   lineBreaks: true,               skiptoken: true},
+    not_element:      { match: /./,     lineBreaks: true              , notext: true, sublexer:'selector_element' },
+  }, 
   attribute: {
-    space:            { match: /\s+/,                              lineBreaks: true, skiptoken: true                 },
-    attribute_name:   { match: /[^\/\n\s=<>\*\?\! \]\t\n\s\]\)]+/, lineBreaks: false, nextlexer:'attribute_operator' },
+    space:            { match: /\s+/,                            lineBreaks: true, skiptoken: true                 },
+    attribute_name:   { match: /[^\/\n\s=<>\*\?\! \t\n\s\]\)]+/, lineBreaks: false, nextlexer:'attribute_operator' },
   },
   attribute_operator: {
     space:            { match: /\s+/,              lineBreaks: true,  skiptoken: true             },
@@ -72,7 +96,7 @@ class Query {
         let lexer;
         try {
           let lexermoodefiniton = {};
-          Object.entries(type).forEach( ([name, e]) => lexermoodefiniton[name] = { match: e.match, lineBreaks:e.lineBreaks });
+          Object.keys(type).forEach( (name) => lexermoodefiniton[name] = { match: type[name].match, lineBreaks:type[name].lineBreaks });
           //console.log(lexermoodefiniton);
           lexer = moo.compile(lexermoodefiniton);
           lexer.type = type;
@@ -137,25 +161,7 @@ class Query {
         lexer: tokenType.sublexer ? this.lexers[tokenType.sublexer] : nextlexer,
         lexerType: tokenType.sublexer ? this.lexerTypes[tokenType.sublexer] : nextlexertype,
       };
-{
-      let t = token;
-      let log = "";
-      while (t) {
-        log = t.lexerType.name+"."+ (t.tokenType.name ||"") + (log ? " / "+ log : '');
-        t=t.parent;
-      }
-      /*
-      console.log(log+ " ("+rawdata.type+") '"+rawdata.text+"'"
-      + ((token.tokenType.notext) ? " *NOTEXT*" : "")
-        + ((token.tokenType.skiptoken) ? " *SKIPPED*" : "")
-        + ((token.tokenType.end) ? " *END => "+current.parent.lexerType.name+"*" : "")
-        + ((token.tokenType.nextlexer) ? " *NEXT="+token.tokenType.nextlexer+"*" : "")
-        + ((token.tokenType.sublexer) ? " *SUB="+token.tokenType.sublexer+"*" : "")
-        + " PARENT="+(token.parent ? token.parent.tokenType.name : "")
-        + " CURRENT="+(current.lexerType.name)
-      );
-      */
-}
+
       if (!token.tokenType.skiptoken) {
         current.children.push(token);
       }
@@ -184,6 +190,7 @@ class Query {
         nextlexer.reset(remainingString);
       }
       if (token.tokenType.end) {
+      console.log('END '+current.lexerType);
         let parent = current.parent;
         current = parent;
         nextlexertype = parent.lexerType;
@@ -191,11 +198,16 @@ class Query {
         nextlexer.reset(remainingString);
       }
     }
+    while (current) {
+      console.log('QUERY FINAL: END '+current.lexerType);
+      current = current.parent;
+    }
+    
     return rootToken;
   }
 }
 
-let testString = '@*titi*/**/toto/tutu [attr] :value :has(@toto*/** [sub==false] :value>=23) [attr2=123]';
+let testString = '@titi/*toto** [attr1] :value>=23 :has(@sub/* [attrSub*="i\'am (a \\"string\\")"]), [attr2=123]';
 console.log('testString="'+testString+'"\n');
 
 
